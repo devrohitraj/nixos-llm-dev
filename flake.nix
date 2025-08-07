@@ -1,0 +1,122 @@
+{
+  description = "NixOS setup for ML/LLM devs with 3090 GPU, Ollama, Chrome, VS Code, Cursor, and Home Manager.";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    flake-utils.url = "github:numtide/flake-utils";
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { self, nixpkgs, flake-utils, home-manager, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+        };
+      in {
+        nixosConfigurations.devbox = nixpkgs.lib.nixosSystem {
+          system = "x86_64-linux";
+
+          modules = [
+            ./hardware-configuration.nix
+
+            {
+              nix.settings.experimental-features = [ "nix-command" "flakes" ];
+              nixpkgs.config.allowUnfree = true;
+
+              services.xserver.videoDrivers = [ "nvidia" ];
+              hardware.nvidia = {
+                modesetting.enable = true;
+                package = config.boot.kernelPackages.nvidiaPackages.stable;
+              };
+
+              services.ollama = {
+                enable = true;
+                acceleration = "cuda";
+              };
+
+              environment.systemPackages = with pkgs; [
+                google-chrome
+                vscode
+                ollama
+                python311
+                python311Packages.pytorch
+                python311Packages.transformers
+                git
+                wget curl unzip
+                zsh
+              ];
+
+              services.xserver.enable = true;
+              services.displayManager.sddm.enable = true;
+              services.desktopManager.plasma6.enable = true;
+              networking.networkmanager.enable = true;
+
+              users.users.darkclown = {
+                isNormalUser = true;
+                extraGroups = [ "wheel" "networkmanager" "video" ];
+                shell = pkgs.zsh;
+              };
+
+              systemd.user.services.install-cursor = {
+                description = "Install Cursor IDE AppImage";
+                wantedBy = [ "default.target" ];
+                script = ''
+                  mkdir -p /home/darkclown/Applications
+                  cd /home/darkclown/Applications
+                  if [ ! -f cursor.AppImage ]; then
+                    wget https://cursor.sh/download -O cursor.AppImage
+                    chmod +x cursor.AppImage
+                  fi
+                '';
+              };
+            }
+
+            home-manager.nixosModules.home-manager
+            {
+              home-manager.useUserPackages = true;
+              home-manager.useGlobalPkgs = true;
+              home-manager.users.darkclown = { pkgs, ... }: {
+                home.stateVersion = "24.05";
+                programs.home-manager.enable = true;
+
+                programs.vscode = {
+                  enable = true;
+                  extensions = with pkgs.vscode-extensions; [
+                    ms-python.python
+                    ms-toolsai.jupyter
+                    github.copilot
+                    github.copilot-chat
+                    ms-vscode.cpptools
+                    formulahendry.code-runner
+                  ];
+                };
+              };
+            }
+          ];
+        };
+
+        devShells.default = pkgs.mkShell {
+          name = "llm-dev-shell";
+          buildInputs = with pkgs; [
+            python311
+            python311Packages.pip
+            python311Packages.setuptools
+            python311Packages.pytorch
+            python311Packages.transformers
+            ollama
+            git
+            jq
+            curl
+          ];
+          shellHook = ''
+            echo "\n🧠 Welcome to your ML/LLM dev shell (Python + Ollama ready)"
+            echo "Activate your virtualenv or use 'ollama run <model>' to test"
+          '';
+        };
+      });
+}
