@@ -23,6 +23,17 @@
 
           modules = [
             ./hardware-configuration.nix
+boot.loader.systemd-boot.enable = false;
+boot.loader.efi = {
+  canTouchEfiVariables = true;
+  efiSysMountPoint = "/boot/efi";
+};
+boot.loader.grub = {
+  enable = true;
+  efiSupport = true;
+  device = "nodev";
+  useOSProber = true;  # shows Windows
+};
 
             {
               nix.settings.experimental-features = [ "nix-command" "flakes" ];
