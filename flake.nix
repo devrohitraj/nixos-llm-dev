@@ -2,116 +2,132 @@
   description = "NixOS setup for ML/LLM devs with 3090 GPU, Ollama, Chrome, VS Code, Cursor, and Home Manager.";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     flake-utils.url = "github:numtide/flake-utils";
     home-manager = {
-      url = "github:nix-community/home-manager";
+      url = "github:nix-community/home-manager/release-25.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, home-manager, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = import nixpkgs {
-          inherit system;
-          config.allowUnfree = true;
-        };
-      in {
-        nixosConfigurations.devbox = nixpkgs.lib.nixosSystem {
-          system = "x86_64-linux";
+  outputs = { self, nixpkgs, flake-utils, home-manager, ... }: {
 
-          modules = [
-            ./hardware-configuration.nix
-boot.loader.systemd-boot.enable = false;
-boot.loader.efi = {
-  canTouchEfiVariables = true;
-  efiSysMountPoint = "/boot/efi";
-};
-boot.loader.grub = {
-  enable = true;
-  efiSupport = true;
-  device = "nodev";
-  useOSProber = true;  # shows Windows
-};
+    ############################
+    #  NixOS Configuration
+    ############################
+    nixosConfigurations.devbox = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
 
-            {
-              nix.settings.experimental-features = [ "nix-command" "flakes" ];
-              nixpkgs.config.allowUnfree = true;
+      modules = [
+        ./hardware-configuration.nix
 
-              services.xserver.videoDrivers = [ "nvidia" ];
-              hardware.nvidia = {
-                modesetting.enable = true;
-                package = config.boot.kernelPackages.nvidiaPackages.stable;
-              };
+        ({ config, pkgs, ... }: {
+          nix.settings.experimental-features = [ "nix-command" "flakes" ];
+          nixpkgs.config.allowUnfree = true;
 
-              services.ollama = {
-                enable = true;
-                acceleration = "cuda";
-              };
+          # Bootloader (GRUB on EFI)
+          boot.loader.systemd-boot.enable = false;
+          boot.loader.efi = {
+            canTouchEfiVariables = true;
+            efiSysMountPoint = "/boot/efi";
+          };
+          boot.loader.grub = {
+            enable = true;
+            efiSupport = true;
+            device = "nodev";
+            useOSProber = true;
+          };
+          programs.zsh.enable = true;
 
-              environment.systemPackages = with pkgs; [
-                google-chrome
-                vscode
-                ollama
-                python311
-                python311Packages.pytorch
-                python311Packages.transformers
-                git
-                wget curl unzip
-                zsh
-              ];
+          # NVIDIA GPU
+          services.xserver.videoDrivers = [ "nvidia" ];
+  hardware.nvidia = {
+    package = config.boot.kernelPackages.nvidiaPackages.stable;
+    open = true;
+    modesetting.enable = true;
+    powerManagement.enable = true;
+  };
 
-              services.xserver.enable = true;
-              services.displayManager.sddm.enable = true;
-              services.desktopManager.plasma6.enable = true;
-              networking.networkmanager.enable = true;
+          # Ollama LLM runtime
+          services.ollama = {
+            enable = true;
+            acceleration = "cuda";
+          };
 
-              users.users.darkclown = {
-                isNormalUser = true;
-                extraGroups = [ "wheel" "networkmanager" "video" ];
-                shell = pkgs.zsh;
-              };
-
-              systemd.user.services.install-cursor = {
-                description = "Install Cursor IDE AppImage";
-                wantedBy = [ "default.target" ];
-                script = ''
-                  mkdir -p /home/darkclown/Applications
-                  cd /home/darkclown/Applications
-                  if [ ! -f cursor.AppImage ]; then
-                    wget https://cursor.sh/download -O cursor.AppImage
-                    chmod +x cursor.AppImage
-                  fi
-                '';
-              };
-            }
-
-            home-manager.nixosModules.home-manager
-            {
-              home-manager.useUserPackages = true;
-              home-manager.useGlobalPkgs = true;
-              home-manager.users.darkclown = { pkgs, ... }: {
-                home.stateVersion = "24.05";
-                programs.home-manager.enable = true;
-
-                programs.vscode = {
-                  enable = true;
-                  extensions = with pkgs.vscode-extensions; [
-                    ms-python.python
-                    ms-toolsai.jupyter
-                    github.copilot
-                    github.copilot-chat
-                    ms-vscode.cpptools
-                    formulahendry.code-runner
-                  ];
-                };
-              };
-            }
+          # System Packages
+          environment.systemPackages = with pkgs; [
+            google-chrome
+            vscode
+            ollama
+            python311
+            python311Packages.pytorch
+            python311Packages.transformers
+            git
+            wget curl unzip
+            zsh
           ];
-        };
 
-        devShells.default = pkgs.mkShell {
+          # Desktop & Networking
+          services.xserver.enable = true;
+          services.displayManager.sddm.enable = true;
+          services.desktopManager.plasma6.enable = true;
+          networking.networkmanager.enable = true;
+
+          # User
+          users.users.darkclown = {
+            isNormalUser = true;
+            extraGroups = [ "wheel" "networkmanager" "video" ];
+            shell = pkgs.zsh;
+          };
+
+          # Cursor IDE auto-install
+          systemd.user.services.install-cursor = {
+            description = "Install Cursor IDE AppImage";
+            wantedBy = [ "default.target" ];
+            script = ''
+              mkdir -p /home/darkclown/Applications
+              cd /home/darkclown/Applications
+              if [ ! -f cursor.AppImage ]; then
+                wget https://cursor.sh/download -O cursor.AppImage
+                chmod +x cursor.AppImage
+              fi
+            '';
+          };
+        })
+
+        # Home Manager
+        home-manager.nixosModules.home-manager
+        {
+          home-manager.useUserPackages = true;
+          home-manager.useGlobalPkgs = true;
+          home-manager.users.darkclown = { pkgs, ... }: {
+            home.stateVersion = "24.05";
+            programs.home-manager.enable = true;
+
+            programs.vscode = {
+              enable = true;
+              extensions = with pkgs.vscode-extensions; [
+                ms-python.python
+                ms-toolsai.jupyter
+                github.copilot
+                github.copilot-chat
+                ms-vscode.cpptools
+                formulahendry.code-runner
+              ];
+            };
+          };
+        }
+      ];
+    };
+
+    ############################
+    #  Dev Shell
+    ############################
+    devShells = flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+      in {
+        default = pkgs.mkShell {
           name = "llm-dev-shell";
           buildInputs = with pkgs; [
             python311
@@ -130,4 +146,5 @@ boot.loader.grub = {
           '';
         };
       });
+  };
 }
