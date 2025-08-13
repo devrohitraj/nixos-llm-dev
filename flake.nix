@@ -4,10 +4,12 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     flake-utils.url = "github:numtide/flake-utils";
-    home-manager = {
-      url = "github:nix-community/home-manager/release-25.05";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    home-manager.url = "github:nix-community/home-manager/release-25.05";
+    home-manager.inputs.nixpkgs.follows = "nixpkgs";
+   #  home-manager = {
+   #   url = "github:nix-community/home-manager/release-25.05";
+   #   inputs.nixpkgs.follows = "nixpkgs";
+   #  };
   };
 
   outputs = { self, nixpkgs, flake-utils, home-manager, ... }: {
@@ -20,7 +22,19 @@
 
       modules = [
         ./hardware-configuration.nix
+        ./configuration.nix
+        
+        home-manager.nixosModules.home-manager
+        {
+          home-manager.useGlobalPkgs = true;
+          home-manager.useUserPackages = true;
+          # <-- add these two lines
+  home-manager.backupFileExtension = "backup";
+  home-manager.verbose = true;
 
+
+          home-manager.users.darkclown = import ./home.nix;
+        }
         ({ config, pkgs, ... }: {
           nix.settings.experimental-features = [ "nix-command" "flakes" ];
           nixpkgs.config.allowUnfree = true;
@@ -59,13 +73,21 @@
             google-chrome
             vscode
             ollama
-            python311
-            python311Packages.pytorch
-            python311Packages.transformers
+            python312
+            python312Packages.pytorch
+            python312Packages.transformers
             git
             wget curl unzip
             zsh
+            uv
+            pipx
+            firefox
+            # nice CLI set:
+            direnv fzf zoxide eza bat ripgrep fd
           ];
+
+            # programs.zsh.enable = true;
+            programs.xwayland.enable = true;
 
           # Desktop & Networking
           services.xserver.enable = true;
@@ -98,11 +120,15 @@
         # Home Manager
         home-manager.nixosModules.home-manager
         {
-          home-manager.useUserPackages = true;
-          home-manager.useGlobalPkgs = true;
+        #  home-manager.useUserPackages = true;
+        #  home-manager.useGlobalPkgs = true;
           home-manager.users.darkclown = { pkgs, ... }: {
-            home.stateVersion = "24.05";
+            home.stateVersion = "25.05";
             programs.home-manager.enable = true;
+            home.homeDirectory = "/home/darkclown";
+
+  programs.zsh.enable = true;
+  programs.zsh.enableCompletion = true;
 
             programs.vscode = {
               enable = true;
@@ -130,11 +156,11 @@
         default = pkgs.mkShell {
           name = "llm-dev-shell";
           buildInputs = with pkgs; [
-            python311
-            python311Packages.pip
-            python311Packages.setuptools
-            python311Packages.pytorch
-            python311Packages.transformers
+            python312
+            python312Packages.pip
+            python312Packages.setuptools
+            python312Packages.pytorch
+            python312Packages.transformers
             ollama
             git
             jq
