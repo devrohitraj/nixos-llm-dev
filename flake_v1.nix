@@ -1,9 +1,9 @@
 {
-  description = "NixOS devbox: GRUB + NVIDIA + KDE + Browsers + Terminal + HM + DevShell";
+  description = "NixOS devbox: GRUB + NVIDIA + browsers + terminal stack (HM) + devShell";
 
-  ##############################################################################
+  ################################################################################
   # Inputs
-  ##############################################################################
+  ################################################################################
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
 
@@ -15,30 +15,31 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  ##############################################################################
+  ################################################################################
   # Outputs
-  ##############################################################################
+  ################################################################################
   outputs = { self, nixpkgs, home-manager, flake-utils, ... }:
   let
     system = "x86_64-linux";
     lib    = nixpkgs.lib;
     pkgs   = import nixpkgs { inherit system; config.allowUnfree = true; };
 
-    # Safe conditional imports for optional modules/files
+    # Safe conditional module import (no invalid `or` usage)
     maybeImport = path:
       if builtins.pathExists path
       then import path
       else ({ config, pkgs, ... }: {});
 
-    # Minimal HM user module if ./home.nix is missing
+    # Home-Manager user module:
+    # If ./home.nix exists we'll use it, otherwise we provide a minimal, safe default.
     hmUserModule =
       if builtins.pathExists ./home.nix then import ./home.nix else
       ({ pkgs, ... }: {
-        home.username      = "darkclown";
+        home.username = "darkclown";
         home.homeDirectory = "/home/darkclown";
-        home.stateVersion  = "25.05";
+        home.stateVersion = "25.05";
 
-        # Terminal stack & fonts
+        # Nice terminal/user defaults
         home.packages = with pkgs; [
           kitty
           fzf
@@ -86,24 +87,6 @@
             alias ll="ls -lah"
           '';
         };
-
-        # Optional: user service to install Cursor AppImage in ~/Applications
-        systemd.user.services.install-cursor = {
-          Unit.Description = "Install Cursor IDE AppImage";
-          Service = {
-            Type = "oneshot";
-            ExecStart = pkgs.writeShellScript "install-cursor" ''
-              set -euo pipefail
-              mkdir -p "$HOME/Applications"
-              cd "$HOME/Applications"
-              if [ ! -f cursor.AppImage ]; then
-                ${pkgs.curl}/bin/curl -L https://cursor.sh/download -o cursor.AppImage
-                chmod +x cursor.AppImage
-              fi
-            '';
-          };
-          Install.WantedBy = [ "default.target" ];
-        };
       });
   in
   {
@@ -114,101 +97,89 @@
       inherit system;
 
       modules = [
-        # 1) Hardware config + optional base config file
+        # 1) Hardware + (optional) extra system config
         ./hardware-configuration.nix
         (maybeImport ./configuration.nix)
 
-        # 2) Core system config: boot, desktop, drivers, packages
+        # 2) Core system module (bootloader/NVIDIA/browsers/etc.)
         ({ config, pkgs, ... }: {
-          # Flakes & modern CLI
           nix.settings.experimental-features = [ "nix-command" "flakes" ];
           nixpkgs.config.allowUnfree = true;
 
-          ######## Bootloader: GRUB on /boot/efi
+          ## Bootloader: GRUB on /boot/efi
           boot.loader.systemd-boot.enable = false;
           boot.loader.efi = {
             canTouchEfiVariables = true;
-            efiSysMountPoint     = "/boot/efi";
+            efiSysMountPoint = "/boot/efi";
           };
           boot.loader.grub = {
-            enable       = true;
-            efiSupport   = true;
-            device       = "nodev";
-            useOSProber  = true;   # show Windows in menu
+            enable = true;
+            efiSupport = true;
+            device = "nodev";
+            useOSProber = true;   # show Windows
           };
 
-          ######## Desktop: KDE Plasma 6 on SDDM
+          ## Desktop (KDE Plasma on SDDM). Disable if you use something else.
           services.xserver.enable = true;
           services.displayManager.sddm.enable = true;
           services.desktopManager.plasma6.enable = true;
 
-          ######## Networking
+          ## Networking
           networking.networkmanager.enable = true;
 
-          ######## NVIDIA (RTX 3090 / Ampere)
+          ## NVIDIA (RTX 3090 / Ampere). 560+ requires explicit `open`.
           services.xserver.videoDrivers = [ "nvidia" ];
           hardware.nvidia = {
             package = config.boot.kernelPackages.nvidiaPackages.stable;
-            open = true;                 # newer 560+ needs this; good for RTX series
+            open = true;
             modesetting.enable = true;
             powerManagement.enable = true;
           };
 
-          ######## Browsers & tools
-          security.chromiumSuidSandbox.enable = true;  # helps Chrome on some systems
+          ## Browsers + basics
+          security.chromiumSuidSandbox.enable = true;  # helps Chrome launch on some setups
           environment.systemPackages = with pkgs; [
             google-chrome
             firefox
-            vscode                          # VS Code (vscode)
-            # Python + managers
-            python312
-            uv
-            pipx
-            # (optional ML libs; comment out if you prefer poetry/uv to install in venv)
-            python312Packages.pytorch
-            python312Packages.transformers
-            # CLIs
             git curl wget unzip jq
-            # Terminal tools (system-wide too)
-            kitty fzf tmux
           ];
 
-          ######## Fonts (split nerd-fonts namespace)
+          ## Fonts (split nerd-fonts namespace)
           fonts.fontconfig.enable = true;
           fonts.packages = with pkgs; [
             nerd-fonts.fira-code
             nerd-fonts.jetbrains-mono
           ];
 
-          ######## Ollama (CUDA)
+          ## Optional: Ollama with CUDA
           services.ollama = {
             enable = true;
             acceleration = "cuda";
           };
 
-          ######## Shell
+          ## System Zsh (HM handles user polish)
           programs.zsh.enable = true;
 
-          ######## User
+          ## User
           users.users.darkclown = {
             isNormalUser = true;
-            extraGroups  = [ "wheel" "networkmanager" "video" ];
-            shell        = pkgs.zsh;
+            extraGroups = [ "wheel" "networkmanager" "video" ];
+            shell = pkgs.zsh;
           };
         })
 
-        # 3) Optional extra modules (loaded only if the files exist)
+        # 3) Optional extra modules (loaded only if files exist)
         (maybeImport ./modules/common.nix)
         (maybeImport ./modules/desktop.nix)
         (maybeImport ./modules/terminal.nix)
 
         # 4) Home-Manager (as a NixOS module)
         home-manager.nixosModules.home-manager
-        ({ pkgs, ... }: {
-          home-manager.useGlobalPkgs     = true;
-          home-manager.useUserPackages   = true;
+        ({ config, pkgs, ... }: {
+          home-manager.useGlobalPkgs = true;
+          home-manager.useUserPackages = true;
           home-manager.backupFileExtension = "backup";
-          home-manager.verbose           = true;
+          home-manager.verbose = true;
 
           home-manager.users.darkclown = hmUserModule;
         })
@@ -216,23 +187,23 @@
     };
 
     ##############################################################################
-    # Dev shell(s): Python 3.12 + uv + pipx + basics
+    # Dev shells (multi-system) — Python 3.12 + uv + essentials
     ##############################################################################
     devShells = flake-utils.lib.eachDefaultSystem (sys:
       let p = import nixpkgs { system = sys; config.allowUnfree = true; };
       in {
         default = p.mkShell {
-          name = "llm-dev-shell";
+          name = "devbox-uv";
           buildInputs = with p; [
             python312
             python312Packages.pip
             python312Packages.setuptools
-            uv pipx
+            uv
             git jq curl
           ];
           shellHook = ''
             printf "\n🧠 Python 3.12 + uv ready.\n"
-            echo "Tip: uv venv; uv add transformers torch"
+            echo "Use: uv venv ; uv add <pkg>"
           '';
         };
       });
