@@ -1,22 +1,28 @@
 { config, pkgs, lib, ... }:
 {
-  # Some sensible defaults
-  i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
-  console.keyMap = lib.mkDefault "us";
+  # Time sync and journal hygiene
+  services.timesyncd.enable = lib.mkDefault true;
 
-  # Improve DNS reliability (edit for your network)
-  services.resolved = {
+  services.journald.extraConfig = ''
+    SystemMaxUse=1G
+    RuntimeMaxUse=500M
+  '';
+
+  # Firewall skeleton (kept empty by default)
+  networking.firewall = {
     enable = lib.mkDefault true;
-    dnssec = lib.mkDefault "allow-downgrade";
+    allowedTCPPorts = lib.mkDefault [ ];
+    allowedUDPPorts = lib.mkDefault [ ];
   };
 
-  # Trim journal/logs & Nix store GC timers (won't delete live gens)
+  # Locale & console
+  i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
+  console.keyMap     = lib.mkDefault "us";
+
+  # Nix store GC
   nix.gc = {
     automatic = lib.mkDefault true;
-    dates = lib.mkDefault "weekly";
-    options = lib.mkDefault "--delete-older-than 14d";
+    dates     = lib.mkDefault "weekly";
+    options   = lib.mkDefault "--delete-older-than 14d";
   };
-
-  # Don’t duplicate zsh here—system zsh is enabled in flake’s inline module.
 }
-

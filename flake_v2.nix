@@ -1,5 +1,5 @@
 {
-  description = "NixOS devbox: GRUB + NVIDIA + KDE + Browsers + Terminal + HM + DevShell + Cursor";
+  description = "NixOS devbox: GRUB + NVIDIA + KDE + Browsers + Terminal + HM + DevShell";
 
   ##############################################################################
   # Inputs
@@ -13,30 +13,24 @@
     };
 
     flake-utils.url = "github:numtide/flake-utils";
-
-    # NEW: only for code-cursor (and any other “unstable-only” pkgs you need)
-    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
   };
 
   ##############################################################################
   # Outputs
   ##############################################################################
-  outputs = { self, nixpkgs, home-manager, flake-utils, nixpkgs-unstable, ... }:
+  outputs = { self, nixpkgs, home-manager, flake-utils, ... }:
   let
     system = "x86_64-linux";
     lib    = nixpkgs.lib;
     pkgs   = import nixpkgs { inherit system; config.allowUnfree = true; };
 
-    # Unstable set (for Cursor)
-    pkgsUnstable = import nixpkgs-unstable { inherit system; config.allowUnfree = true; };
-
-    # Safe conditional imports
+    # Safe conditional imports for optional modules/files
     maybeImport = path:
       if builtins.pathExists path
       then import path
       else ({ config, pkgs, ... }: {});
 
-    # HM user module (uses ./home.nix if present; otherwise minimal defaults)
+    # Minimal HM user module if ./home.nix is missing
     hmUserModule =
       if builtins.pathExists ./home.nix then import ./home.nix else
       ({ pkgs, ... }: {
@@ -44,18 +38,22 @@
         home.homeDirectory = "/home/darkclown";
         home.stateVersion  = "25.05";
 
+        # Terminal stack & fonts
         home.packages = with pkgs; [
-          kitty fzf tmux
+          kitty
+          fzf
+          tmux
           nerd-fonts.fira-code
           nerd-fonts.jetbrains-mono
-          # If you prefer Cursor per-user instead of system-wide, you may add:
-          # (pkgsUnstable.code-cursor)
         ];
 
         programs.kitty = {
           enable = true;
           font = { name = "JetBrainsMono Nerd Font"; size = 12; };
-          settings = { background_opacity = "0.97"; confirm_os_window_close = 0; };
+          settings = {
+            background_opacity = "0.97";
+            confirm_os_window_close = 0;
+          };
         };
 
         programs.starship.enable = true;
@@ -73,11 +71,11 @@
 
         programs.fzf.enable = true;
 
+        # Robust zsh (works even if bash-only files exist in reused /home)
         programs.zsh = {
           enable = true;
           enableCompletion = true;
           syntaxHighlighting.enable = true;
-          # robust if old bash-only files exist in reused /home
           initExtraFirst = ''
             autoload -Uz compinit bashcompinit
             compinit
@@ -88,78 +86,110 @@
             alias ll="ls -lah"
           '';
         };
+
+        # Optional: user service to install Cursor AppImage in ~/Applications
+        systemd.user.services.install-cursor = {
+          Unit.Description = "Install Cursor IDE AppImage";
+          Service = {
+            Type = "oneshot";
+            ExecStart = pkgs.writeShellScript "install-cursor" ''
+              set -euo pipefail
+              mkdir -p "$HOME/Applications"
+              cd "$HOME/Applications"
+              if [ ! -f cursor.AppImage ]; then
+                ${pkgs.curl}/bin/curl -L https://cursor.sh/download -o cursor.AppImage
+                chmod +x cursor.AppImage
+              fi
+            '';
+          };
+          Install.WantedBy = [ "default.target" ];
+        };
       });
   in
   {
     ##############################################################################
-    # NixOS host
+    # NixOS host(s)
     ##############################################################################
     nixosConfigurations.devbox = lib.nixosSystem {
       inherit system;
 
       modules = [
+        # 1) Hardware config + optional base config file
         ./hardware-configuration.nix
         (maybeImport ./configuration.nix)
 
-        # Core system config
+        # 2) Core system config: boot, desktop, drivers, packages
         ({ config, pkgs, ... }: {
+          # Flakes & modern CLI
           nix.settings.experimental-features = [ "nix-command" "flakes" ];
           nixpkgs.config.allowUnfree = true;
 
-          ## GRUB on /boot/efi
+          ######## Bootloader: GRUB on /boot/efi
           boot.loader.systemd-boot.enable = false;
-          boot.loader.efi = { canTouchEfiVariables = true; efiSysMountPoint = "/boot/efi"; };
-          boot.loader.grub = { enable = true; efiSupport = true; device = "nodev"; useOSProber = true; };
+          boot.loader.efi = {
+            canTouchEfiVariables = true;
+            efiSysMountPoint     = "/boot/efi";
+          };
+          boot.loader.grub = {
+            enable       = true;
+            efiSupport   = true;
+            device       = "nodev";
+            useOSProber  = true;   # show Windows in menu
+          };
 
-          ## KDE Plasma on SDDM
+          ######## Desktop: KDE Plasma 6 on SDDM
           services.xserver.enable = true;
           services.displayManager.sddm.enable = true;
           services.desktopManager.plasma6.enable = true;
 
-          ## Network
+          ######## Networking
           networking.networkmanager.enable = true;
 
-          ## NVIDIA (RTX 3090 / Ampere) — open module as required on 560+
+          ######## NVIDIA (RTX 3090 / Ampere)
           services.xserver.videoDrivers = [ "nvidia" ];
           hardware.nvidia = {
             package = config.boot.kernelPackages.nvidiaPackages.stable;
-            open = true;
+            open = true;                 # newer 560+ needs this; good for RTX series
             modesetting.enable = true;
             powerManagement.enable = true;
           };
 
-          ## Browsers + tools + Cursor
-          security.chromiumSuidSandbox.enable = true;
+          ######## Browsers & tools
+          security.chromiumSuidSandbox.enable = true;  # helps Chrome on some systems
           environment.systemPackages = with pkgs; [
             google-chrome
             firefox
-            vscode-with-extensions
-            python312 uv pipx
+            vscode                          # VS Code (vscode)
+            # Python + managers
+            python312
+            uv
+            pipx
+            # (optional ML libs; comment out if you prefer poetry/uv to install in venv)
             python312Packages.pytorch
             python312Packages.transformers
+            # CLIs
             git curl wget unzip jq
+            # Terminal tools (system-wide too)
             kitty fzf tmux
-
-            # NEW: code-cursor from unstable
-            (pkgsUnstable.code-cursor)
           ];
 
-          ## Fonts
+          ######## Fonts (split nerd-fonts namespace)
           fonts.fontconfig.enable = true;
           fonts.packages = with pkgs; [
             nerd-fonts.fira-code
             nerd-fonts.jetbrains-mono
           ];
 
-          ## Enable keyring so Cursor/VSCode auth works smoothly
-          services.gnome.gnome-keyring.enable = true;
-          security.pam.services.darkclown.enableGnomeKeyring = true;
+          ######## Ollama (CUDA)
+          services.ollama = {
+            enable = true;
+            acceleration = "cuda";
+          };
 
-          ## Ollama (CUDA)
-          services.ollama = { enable = true; acceleration = "cuda"; };
-
-          ## Shell + user
+          ######## Shell
           programs.zsh.enable = true;
+
+          ######## User
           users.users.darkclown = {
             isNormalUser = true;
             extraGroups  = [ "wheel" "networkmanager" "video" ];
@@ -167,42 +197,42 @@
           };
         })
 
+        # 3) Optional extra modules (loaded only if the files exist)
         (maybeImport ./modules/common.nix)
         (maybeImport ./modules/desktop.nix)
         (maybeImport ./modules/terminal.nix)
 
-        # Home-Manager (as a NixOS module)
+        # 4) Home-Manager (as a NixOS module)
         home-manager.nixosModules.home-manager
         ({ pkgs, ... }: {
-          home-manager.useGlobalPkgs       = true;
-          home-manager.useUserPackages     = true;
+          home-manager.useGlobalPkgs     = true;
+          home-manager.useUserPackages   = true;
           home-manager.backupFileExtension = "backup";
-          home-manager.verbose             = true;
-          home-manager.users.darkclown     = hmUserModule;
+          home-manager.verbose           = true;
+
+          home-manager.users.darkclown = hmUserModule;
         })
       ];
     };
 
     ##############################################################################
-    # Dev shell(s): add Cursor + Rust/ALSA like in the example
+    # Dev shell(s): Python 3.12 + uv + pipx + basics
     ##############################################################################
     devShells = flake-utils.lib.eachDefaultSystem (sys:
-      let
-        p = import nixpkgs          { system = sys; config.allowUnfree = true; };
-        u = import nixpkgs-unstable { system = sys; config.allowUnfree = true; };
+      let p = import nixpkgs { system = sys; config.allowUnfree = true; };
       in {
         default = p.mkShell {
           name = "llm-dev-shell";
           buildInputs = with p; [
-            python312 python312Packages.pip python312Packages.setuptools
-            uv pipx git jq curl
-            cargo rustc SDL2 alsa-lib.dev pkg-config
-            # Cursor from unstable in the shell:
-            u.code-cursor
+            python312
+            python312Packages.pip
+            python312Packages.setuptools
+            uv pipx
+            git jq curl
           ];
           shellHook = ''
-            export PKG_CONFIG_PATH=${p.alsa-lib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH
-            printf "\n🧠 Python 3.12 + uv + Cursor + Rust ready.\n"
+            printf "\n🧠 Python 3.12 + uv ready.\n"
+            echo "Tip: uv venv; uv add transformers torch"
           '';
         };
       });
