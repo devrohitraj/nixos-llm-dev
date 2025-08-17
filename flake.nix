@@ -101,6 +101,83 @@
         ./hardware-configuration.nix
         (maybeImport ./configuration.nix)
 
+        {
+  # Let nixpkgs install unfree apps like slack/zoom/spotify/obsidian
+  nixpkgs.config.allowUnfree = true;
+
+  # Shells & core dev
+  programs.zsh.enable = true;
+  environment.systemPackages = with pkgs; [
+    # Shells
+    zsh
+    fish
+
+    # Node & Rust
+    nodejs_20
+    rustup
+    cargo
+    rust-analyzer
+
+    # Containers
+    docker-compose
+    podman
+    podman-compose
+
+    # Python + ML/AI
+    python312
+    uv
+    pipx
+    (python312.withPackages (ps: with ps; [
+      numpy pandas matplotlib
+      jupyter ipykernel
+      scikit-learn
+      transformers accelerate
+      # Torch: CPU build (works anywhere). If you use CUDA, see note below.
+      pytorch
+    ]))
+    # If you want CUDA for torch, prefer this instead of the CPU pytorch above:
+    # python312Packages.torchWithCuda
+
+    # Local LLM
+    ollama
+
+    # Productivity
+    libreoffice
+    obsidian
+    slack
+    discord
+    zoom-us
+    spotify
+
+    # Security / SSH client
+    openssh
+  ];
+
+  # Optional: enable SSH server
+  services.openssh.enable = true;
+
+  # Docker & Podman
+  virtualisation.docker.enable = true;
+  virtualisation.podman.enable = true;
+  # (Optional) if you prefer Docker to manage the default cgroup driver
+  # virtualisation.docker.daemon.settings = { "exec-opts" = [ "native.cgroupdriver=systemd" ]; };
+
+  # User to docker group (replace if your user is different)
+  users.users.darkclown.extraGroups = [
+    "wheel" "networkmanager" "video" "docker"
+  ];
+
+  # Ollama GPU acceleration (set to "cuda" for NVIDIA; "rocm" for AMD)
+  services.ollama = {
+    enable = true;
+    acceleration = "cuda";
+  };
+
+  # For Chromium-based browsers’ sandbox (helps with Chrome/Brave/Edge)
+  security.chromiumSuidSandbox.enable = true;
+}
+
+
         # Core system config
         ({ config, pkgs, ... }: {
           nix.settings.experimental-features = [ "nix-command" "flakes" ];
