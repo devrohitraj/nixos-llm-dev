@@ -46,7 +46,7 @@
 
         home.packages = with pkgs; [
           kitty fzf tmux
-          nerd-fonts.fira-code
+	  nerd-fonts.fira-code
           nerd-fonts.jetbrains-mono
           # If you prefer Cursor per-user instead of system-wide, you may add:
           # (pkgsUnstable.code-cursor)

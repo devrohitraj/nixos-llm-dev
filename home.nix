@@ -45,6 +45,16 @@
     '';
   };
 
+ # NPM global prefix & PATH (Nix-safe)
+  home.sessionVariables = {
+    NPM_CONFIG_PREFIX = "/home/darkclown/.npm-global";
+    # ANTHROPIC_API_KEY = "sk-ant-...";  # optional
+  };
+  home.sessionPath = [
+    "/home/darkclown/.npm-global/bin"
+  ];
+
+
   # fzf
   programs.fzf.enable = true;
 
@@ -61,6 +71,7 @@
     '';
 
     initExtra = ''
+      export PATH="$HOME/.npm-global/bin:$PATH"
       eval "$(starship init zsh)"
       alias ll="ls -lah"
       alias gs="git status"
